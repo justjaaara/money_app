@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "25735619387",
+    "project_id": "flutter-01-4f2ab",
+    "storage_bucket": "flutter-01-4f2ab.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:25735619387:android:4c490346d6af0a320f4d1e",
+        "android_client_info": {
+          "package_name": "com.example.money_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcAZVx1HKRIb8rlI7TJ_YnyAgxA49SNBk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
