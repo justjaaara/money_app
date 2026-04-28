@@ -1,0 +1,125 @@
+platform :osx, '10.15'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'ephemeral', 'Flutter-Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure \"flutter pub get\" is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Flutter-Generated.xcconfig, then run \"flutter pub get\""
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_macos_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_macos_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  def add_script_output_stamp(phase, target_name)
+    stamp_name = "#{target_name}-#{phase.name}".gsub(/[^A-Za-z0-9_.-]+/, '_')
+    stamp_path = "$(DERIVED_FILE_DIR)/#{stamp_name}.stamp"
+    phase.output_paths = [stamp_path]
+
+    original_script = phase.shell_script.to_s
+    phase.shell_script = <<~SCRIPT
+      stamp_path="#{stamp_path}"
+      touch_stamp() {
+        mkdir -p "$(dirname \"$stamp_path\")"
+        touch "$stamp_path"
+      }
+      trap touch_stamp EXIT
+
+      #{original_script}
+    SCRIPT
+  end
+
+  installer.pods_project.targets.each do |target|
+    flutter_additional_macos_build_settings(target)
+
+    # Some podspecs add per-source-file COMPILER_FLAGS with this malformed token.
+    # Xcode/clang reads it as unsupported "-G" on macOS.
+    source_files = target.respond_to?(:source_build_phase) ? (target.source_build_phase&.files || []) : []
+    source_files.each do |build_file|
+      settings = build_file.settings
+      next unless settings.is_a?(Hash)
+
+      compiler_flags = settings['COMPILER_FLAGS']
+      next if compiler_flags.nil?
+
+      flags = compiler_flags.to_s.split(' ')
+      flags.reject! { |flag| flag.start_with?('-GCC_WARN_INHIBIT_ALL_WARNINGS') }
+
+      if flags.empty?
+        settings.delete('COMPILER_FLAGS')
+      else
+        settings['COMPILER_FLAGS'] = flags.join(' ')
+      end
+    end
+
+    target.build_configurations.each do |config|
+      # Xcode 26 + some pod specs can emit this as a compiler arg and clang parses it as "-G".
+      %w[OTHER_CFLAGS OTHER_CPLUSPLUSFLAGS].each do |key|
+        value = config.build_settings[key]
+        next if value.nil?
+
+        flags = value.is_a?(Array) ? value : value.to_s.split(' ')
+        flags.reject! { |flag| flag == '-GCC_WARN_INHIBIT_ALL_WARNINGS' }
+        config.build_settings[key] = flags
+      end
+
+      config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'NO'
+
+      if ['gRPC-Core', 'gRPC-C++'].include?(target.name)
+        cxx_flags = config.build_settings['OTHER_CPLUSPLUSFLAGS']
+        cxx_flags = cxx_flags.is_a?(Array) ? cxx_flags : cxx_flags.to_s.split(' ')
+        cxx_flags << '-Wno-error=missing-template-arg-list-after-template-kw'
+        config.build_settings['OTHER_CPLUSPLUSFLAGS'] = cxx_flags.uniq
+      end
+
+      # Keep pod targets on a modern supported deployment target for current Xcode.
+      config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '10.15'
+    end
+
+    target.shell_script_build_phases.each do |phase|
+      next unless phase.name == 'Create Symlinks to Header Folders'
+
+      add_script_output_stamp(phase, target.name)
+    end
+  end
+
+  installer.aggregate_targets.each do |aggregate_target|
+    user_project = aggregate_target.user_project
+    next unless user_project
+
+    user_project.native_targets.each do |native_target|
+      next unless native_target.name == 'Runner'
+
+      native_target.shell_script_build_phases.each do |phase|
+        next unless phase.name == 'Run Script'
+
+        phase.output_paths = ["$(DERIVED_FILE_DIR)/Runner-Run_Script.stamp"]
+      end
+    end
+  end
+end
