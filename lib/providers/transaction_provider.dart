@@ -34,7 +34,7 @@ class TransactionProvider extends ChangeNotifier {
         '[MoneyApp][Provider] loadTransactions local=${_transactions.length} pending=$_hasPendingChanges',
       );
       notifyListeners();
-      unawaited(_syncAndRefresh());
+      unawaited(_syncAndRefresh(includeRemotePull: true));
     } catch (e) {
       _errorMessage = 'Error loading transactions: $e';
       debugPrint('[MoneyApp][Provider] loadTransactions error: $e');
@@ -203,9 +203,12 @@ class TransactionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _syncAndRefresh() async {
+  Future<void> _syncAndRefresh({bool includeRemotePull = false}) async {
     try {
       await _databaseService.syncPendingTransactions();
+      if (includeRemotePull) {
+        await _databaseService.pullFromRemote();
+      }
       _transactions = await _databaseService.getAllTransactions();
       _hasPendingChanges = await _databaseService.hasPendingChanges();
       notifyListeners();
