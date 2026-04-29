@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'task_remote_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
@@ -17,8 +19,10 @@ class DatabaseService {
     : _database = AppDatabase(),
       _firestore = FirebaseFirestore.instance,
       _connectivity = Connectivity() {
+    _remote = TaskRemoteService(_firestore);
     debugPrint('[MoneyApp][DB] DatabaseService initialized');
     debugPrint('[MoneyApp][DB] Firestore.instance.app=${_firestore.app.name}');
+    debugPrint('[MoneyApp][DB] Platform: ${kIsWeb ? 'WEB' : 'NATIVE'}');
     _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
       result,
     ) {
@@ -28,8 +32,9 @@ class DatabaseService {
     });
   }
 
-  final AppDatabase _database;
+  final AppDatabase? _database;
   final FirebaseFirestore _firestore;
+  late final TaskRemoteService _remote;
   final Connectivity _connectivity;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
@@ -37,29 +42,41 @@ class DatabaseService {
     debugPrint(
       '[MoneyApp][DB] addTransaction local start: ${transaction.id} ${transaction.title}',
     );
-    await _database
-        .into(_database.transactions)
-        .insertOnConflictUpdate(
-          TransactionsCompanion.insert(
-            id: transaction.id,
-            title: transaction.title,
-            amount: transaction.amount,
-            type: transaction.type,
-            date: transaction.date,
-            category: Value(transaction.category),
-            description: Value(transaction.description),
-            syncedWithFirebase: const Value(false),
-            createdAt: transaction.createdAt,
-            updatedAt: transaction.updatedAt,
-          ),
-        );
-    debugPrint('[MoneyApp][DB] addTransaction local saved: ${transaction.id}');
+    if (_database != null) {
+      await _database!
+          .into(_database!.transactions)
+          .insertOnConflictUpdate(
+            TransactionsCompanion.insert(
+              id: transaction.id,
+              title: transaction.title,
+              amount: transaction.amount,
+              type: transaction.type,
+              date: transaction.date,
+              category: Value(transaction.category),
+              description: Value(transaction.description),
+              syncedWithFirebase: const Value(false),
+              createdAt: transaction.createdAt,
+              updatedAt: transaction.updatedAt,
+            ),
+          );
+      debugPrint(
+        '[MoneyApp][DB] addTransaction local saved: ${transaction.id}',
+      );
+    } else {
+      debugPrint('[MoneyApp][DB] addTransaction skipped (web platform)');
+    }
 
     unawaited(_syncTransactionIfOnline(transaction));
   }
 
   Future<List<model.Transaction>> getAllTransactions() async {
-    final rows = await _database.select(_database.transactions).get();
+    if (_database == null) {
+      debugPrint(
+        '[MoneyApp][DB] getAllTransactions (web) - returning empty list',
+      );
+      return [];
+    }
+    final rows = await _database!.select(_database!.transactions).get();
     final pendingDeletionIds = await _pendingDeletionIds();
     return rows
         .where((row) => !pendingDeletionIds.contains(row.id))
@@ -71,8 +88,9 @@ class DatabaseService {
   Future<List<model.Transaction>> getTransactionsByType(
     model.TransactionType type,
   ) async {
-    final rows = await (_database.select(
-      _database.transactions,
+    if (_database == null) return [];
+    final rows = await (_database!.select(
+      _database!.transactions,
     )..where((tbl) => tbl.type.equals(type.name))).get();
     final pendingDeletionIds = await _pendingDeletionIds();
     return rows
@@ -86,8 +104,9 @@ class DatabaseService {
     DateTime startDate,
     DateTime endDate,
   ) async {
+    if (_database == null) return [];
     final rows =
-        await (_database.select(_database.transactions)..where(
+        await (_database!.select(_database!.transactions)..where(
               (tbl) =>
                   tbl.date.isBiggerOrEqualValue(startDate) &
                   tbl.date.isSmallerOrEqualValue(endDate),
@@ -102,8 +121,9 @@ class DatabaseService {
   }
 
   Future<model.Transaction?> getTransactionById(String id) async {
-    final row = await (_database.select(
-      _database.transactions,
+    if (_database == null) return null;
+    final row = await (_database!.select(
+      _database!.transactions,
     )..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
     if (row == null) return null;
     final pendingDeletionIds = await _pendingDeletionIds();
@@ -112,9 +132,10 @@ class DatabaseService {
   }
 
   Future<int> updateTransaction(model.Transaction transaction) async {
+    if (_database == null) return 0;
     final count =
-        await (_database.update(
-          _database.transactions,
+        await (_database!.update(
+          _database!.transactions,
         )..where((tbl) => tbl.id.equals(transaction.id))).write(
           TransactionsCompanion(
             title: Value(transaction.title),
@@ -141,20 +162,21 @@ class DatabaseService {
   }
 
   Future<int> deleteTransaction(String id) async {
+    if (_database == null) return 1;
     final isOnline = await _isOnline();
     if (isOnline) {
       await _deleteRemote(id);
-      await (_database.delete(
-        _database.transactions,
+      await (_database!.delete(
+        _database!.transactions,
       )..where((tbl) => tbl.id.equals(id))).go();
-      await (_database.delete(
-        _database.pendingDeletions,
+      await (_database!.delete(
+        _database!.pendingDeletions,
       )..where((tbl) => tbl.transactionId.equals(id))).go();
       return 1;
     }
 
-    await _database
-        .into(_database.pendingDeletions)
+    await _database!
+        .into(_database!.pendingDeletions)
         .insertOnConflictUpdate(
           PendingDeletionsCompanion.insert(transactionId: id),
         );
@@ -162,8 +184,9 @@ class DatabaseService {
   }
 
   Future<List<model.Transaction>> getUnsyncedTransactions() async {
-    final rows = await (_database.select(
-      _database.transactions,
+    if (_database == null) return [];
+    final rows = await (_database!.select(
+      _database!.transactions,
     )..where((tbl) => tbl.syncedWithFirebase.equals(false))).get();
     final pendingDeletionIds = await _pendingDeletionIds();
     return rows
@@ -173,8 +196,9 @@ class DatabaseService {
   }
 
   Future<int> markAsSynced(String id) async {
-    return (_database.update(
-      _database.transactions,
+    if (_database == null) return 0;
+    return (_database!.update(
+      _database!.transactions,
     )..where((tbl) => tbl.id.equals(id))).write(
       TransactionsCompanion(
         syncedWithFirebase: const Value(true),
@@ -184,8 +208,9 @@ class DatabaseService {
   }
 
   Future<int> deleteAllTransactions() async {
-    await _database.delete(_database.pendingDeletions).go();
-    return _database.delete(_database.transactions).go();
+    if (_database == null) return 0;
+    await _database!.delete(_database!.pendingDeletions).go();
+    return _database!.delete(_database!.transactions).go();
   }
 
   Future<double> getTotalBalance() async {
@@ -224,6 +249,7 @@ class DatabaseService {
   }
 
   Future<void> syncPendingTransactions() async {
+    if (_database == null) return;
     final online = await _isOnline();
     debugPrint('[MoneyApp][DB] syncPendingTransactions online=$online');
     if (!online) return;
@@ -236,20 +262,58 @@ class DatabaseService {
       await _pushTransaction(transaction);
     }
 
-    final pendingDeletions = await _database
-        .select(_database.pendingDeletions)
+    final pendingDeletions = await _database!
+        .select(_database!.pendingDeletions)
         .get();
     debugPrint(
       '[MoneyApp][DB] syncPendingTransactions deletions=${pendingDeletions.length}',
     );
     for (final deletion in pendingDeletions) {
-      await _deleteRemote(deletion.transactionId);
-      await (_database.delete(
-        _database.transactions,
+      try {
+        await _remote.delete(deletion.transactionId);
+      } catch (e) {
+        debugPrint(
+          '[MoneyApp][DB] remote delete failed id=${deletion.transactionId} error=$e',
+        );
+        continue;
+      }
+      await (_database!.delete(
+        _database!.transactions,
       )..where((tbl) => tbl.id.equals(deletion.transactionId))).go();
-      await (_database.delete(
-        _database.pendingDeletions,
+      await (_database!.delete(
+        _database!.pendingDeletions,
       )..where((tbl) => tbl.transactionId.equals(deletion.transactionId))).go();
+    }
+  }
+
+  /// Pull data from remote Firestore and upsert into local SQLite.
+  /// This is on-demand (call from UI pull-to-refresh).
+  Future<void> pullFromRemote() async {
+    if (_database == null) return;
+    debugPrint('[MoneyApp][DB] pullFromRemote start');
+    try {
+      final remote = await _remote.fetchAll();
+      for (final t in remote) {
+        await _database!
+            .into(_database!.transactions)
+            .insertOnConflictUpdate(
+              TransactionsCompanion.insert(
+                id: t.id,
+                title: t.title,
+                amount: t.amount,
+                type: t.type,
+                date: t.date,
+                category: Value(t.category),
+                description: Value(t.description),
+                syncedWithFirebase: const Value(true),
+                createdAt: t.createdAt,
+                updatedAt: t.updatedAt,
+              ),
+            );
+      }
+      debugPrint('[MoneyApp][DB] pullFromRemote done count=${remote.length}');
+    } catch (e) {
+      debugPrint('[MoneyApp][DB] pullFromRemote ERROR: $e');
     }
   }
 
@@ -261,7 +325,9 @@ class DatabaseService {
 
   Future<void> dispose() async {
     await _connectivitySubscription?.cancel();
-    await _database.close();
+    if (_database != null) {
+      await _database!.close();
+    }
   }
 
   model.Transaction _mapRowToModel(LocalTransaction row) {
@@ -308,9 +374,11 @@ class DatabaseService {
         '[MoneyApp][DB] _pushTransaction firestore ok id=${transaction.id}',
       );
       await markAsSynced(transaction.id);
-      await (_database.delete(
-        _database.pendingDeletions,
-      )..where((tbl) => tbl.transactionId.equals(transaction.id))).go();
+      if (_database != null) {
+        await (_database!.delete(
+          _database!.pendingDeletions,
+        )..where((tbl) => tbl.transactionId.equals(transaction.id))).go();
+      }
       debugPrint('[MoneyApp][DB] _pushTransaction done id=${transaction.id}');
     } catch (e) {
       debugPrint(
@@ -334,7 +402,8 @@ class DatabaseService {
   }
 
   Future<Set<String>> _pendingDeletionIds() async {
-    final rows = await _database.select(_database.pendingDeletions).get();
+    if (_database == null) return {};
+    final rows = await _database!.select(_database!.pendingDeletions).get();
     return rows.map((row) => row.transactionId).toSet();
   }
 

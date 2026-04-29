@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -18,7 +19,8 @@ class Transactions extends Table {
   DateTimeColumn get date => dateTime()();
   TextColumn get category => text().nullable()();
   TextColumn get description => text().nullable()();
-  BoolColumn get syncedWithFirebase => boolean().withDefault(const Constant(false))();
+  BoolColumn get syncedWithFirebase =>
+      boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -35,12 +37,15 @@ class PendingDeletions extends Table {
   Set<Column<Object>> get primaryKey => {transactionId};
 }
 
-class TransactionTypeConverter extends TypeConverter<model.TransactionType, String> {
+class TransactionTypeConverter
+    extends TypeConverter<model.TransactionType, String> {
   const TransactionTypeConverter();
 
   @override
   model.TransactionType fromSql(String fromDb) {
-    return model.TransactionType.values.firstWhere((value) => value.name == fromDb);
+    return model.TransactionType.values.firstWhere(
+      (value) => value.name == fromDb,
+    );
   }
 
   @override
@@ -55,18 +60,31 @@ class AppDatabase extends _$AppDatabase {
   int get schemaVersion => 1;
 
   static QueryExecutor _openConnection() {
-    return driftDatabase(
-      name: 'money_app',
-      native: DriftNativeOptions(
-        databaseDirectory: () async {
-          final directory = await getApplicationSupportDirectory();
-          final databaseDirectory = Directory(p.join(directory.path, 'db'));
-          if (!await databaseDirectory.exists()) {
-            await databaseDirectory.create(recursive: true);
-          }
-          return databaseDirectory;
-        },
-      ),
-    );
+    if (kIsWeb) {
+      // Use sqlite3.wasm + a worker on web so Drift can run in the browser.
+      // Make sure `web/sqlite3.wasm` and `web/drift_worker.dart.js` exist and
+      // are served by your web server.
+      return driftDatabase(
+        name: 'money_app',
+        web: DriftWebOptions(
+          sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+          driftWorker: Uri.parse('drift_worker.dart.js'),
+        ),
+      );
+    } else {
+      return driftDatabase(
+        name: 'money_app',
+        native: DriftNativeOptions(
+          databaseDirectory: () async {
+            final directory = await getApplicationSupportDirectory();
+            final databaseDirectory = Directory(p.join(directory.path, 'db'));
+            if (!await databaseDirectory.exists()) {
+              await databaseDirectory.create(recursive: true);
+            }
+            return databaseDirectory;
+          },
+        ),
+      );
+    }
   }
 }

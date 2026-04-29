@@ -45,8 +45,7 @@ class Transaction {
       id: map['id'] as String,
       title: map['title'] as String,
       amount: map['amount'] as double,
-      type: TransactionType.values
-          .firstWhere((e) => e.name == map['type']),
+      type: TransactionType.values.firstWhere((e) => e.name == map['type']),
       date: DateTime.parse(map['date'] as String),
       category: map['category'] as String?,
       description: map['description'] as String?,
@@ -69,6 +68,22 @@ class Transaction {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
+  }
+
+  /// Create Transaction from Firebase Map
+  factory Transaction.fromFirebaseMap(Map<String, dynamic> map) {
+    return Transaction(
+      id: map['id'] as String,
+      title: map['title'] as String,
+      amount: (map['amount'] as num).toDouble(),
+      type: TransactionType.values.firstWhere((e) => e.name == map['type']),
+      date: DateTime.parse(map['date'] as String),
+      category: map['category'] as String?,
+      description: map['description'] as String?,
+      syncedWithFirebase: true,
+      createdAt: DateTime.parse(map['createdAt'] as String),
+      updatedAt: DateTime.parse(map['updatedAt'] as String),
+    );
   }
 
   /// Create a copy of Transaction with updated fields
@@ -99,7 +114,4 @@ class Transaction {
   }
 }
 
-enum TransactionType {
-  income,
-  expense,
-}
+enum TransactionType { income, expense }

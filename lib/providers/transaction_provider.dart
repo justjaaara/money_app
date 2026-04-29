@@ -215,6 +215,22 @@ class TransactionProvider extends ChangeNotifier {
     }
   }
 
+  /// Pull data from remote Firestore and upsert into local DB, then refresh UI.
+  Future<void> pullFromRemote() async {
+    _setLoading(true);
+    try {
+      await _databaseService.pullFromRemote();
+      _transactions = await _databaseService.getAllTransactions();
+      _hasPendingChanges = await _databaseService.hasPendingChanges();
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = 'Error pulling from remote: $e';
+      notifyListeners();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   void clearError() {
     _errorMessage = null;
     notifyListeners();
