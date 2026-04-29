@@ -116,14 +116,12 @@ class TransactionProvider extends ChangeNotifier {
 
       await _databaseService.updateTransaction(updatedTransaction);
       _hasPendingChanges = await _databaseService.hasPendingChanges();
-      await _databaseService.syncPendingTransactions();
       final index = _transactions.indexWhere((t) => t.id == id);
       if (index != -1) {
         _transactions[index] = updatedTransaction;
       }
-      _transactions = await _databaseService.getAllTransactions();
-      _hasPendingChanges = await _databaseService.hasPendingChanges();
       notifyListeners();
+      unawaited(_syncAndRefresh());
     } catch (e) {
       _errorMessage = 'Error updating transaction: $e';
       notifyListeners();
@@ -134,13 +132,15 @@ class TransactionProvider extends ChangeNotifier {
   Future<void> deleteTransaction(String id) async {
     try {
       _errorMessage = null;
+      debugPrint('[MoneyApp][Provider] deleteTransaction start id=$id');
       await _databaseService.deleteTransaction(id);
-      _hasPendingChanges = await _databaseService.hasPendingChanges();
-      await _databaseService.syncPendingTransactions();
-      _transactions = await _databaseService.getAllTransactions();
-      _hasPendingChanges = await _databaseService.hasPendingChanges();
       _transactions.removeWhere((t) => t.id == id);
+      _hasPendingChanges = await _databaseService.hasPendingChanges();
+      debugPrint(
+        '[MoneyApp][Provider] deleteTransaction local removed id=$id pending=$_hasPendingChanges',
+      );
       notifyListeners();
+      unawaited(_syncAndRefresh());
     } catch (e) {
       _errorMessage = 'Error deleting transaction: $e';
       notifyListeners();

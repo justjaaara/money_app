@@ -22,6 +22,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   late TransactionType _selectedType;
   late DateTime _selectedDate;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -63,6 +64,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(isEditing ? 'Edit Transaction' : 'Add Transaction'),
+        actions: [
+          if (isEditing)
+            IconButton(
+              onPressed: _isSubmitting
+                  ? null
+                  : () => _confirmDelete(context, widget.transaction!.id),
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete transaction',
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -188,7 +199,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                          onPressed: () async => await _saveTransaction(context, isEditing),
+                        onPressed: _isSubmitting
+                            ? null
+                            : () async {
+                                await _saveTransaction(context, isEditing);
+                              },
                         child: Text(isEditing ? 'Update' : 'Save'),
                       ),
                     ),
@@ -243,41 +258,101 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final transactionProvider = context.read<TransactionProvider>();
     final amount = double.parse(_amountController.text);
 
-    if (isEditing) {
-      await transactionProvider.updateTransaction(
-        id: widget.transaction!.id,
-        title: _titleController.text,
-        amount: amount,
-        type: _selectedType,
-        date: _selectedDate,
-        category: _categoryController.text.isEmpty
-            ? null
-            : _categoryController.text,
-        description: _descriptionController.text.isEmpty
-            ? null
-            : _descriptionController.text,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Transaction updated successfully')),
-      );
-    } else {
-      await transactionProvider.addTransaction(
-        title: _titleController.text,
-        amount: amount,
-        type: _selectedType,
-        date: _selectedDate,
-        category: _categoryController.text.isEmpty
-            ? null
-            : _categoryController.text,
-        description: _descriptionController.text.isEmpty
-            ? null
-            : _descriptionController.text,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Transaction added successfully')),
-      );
-    }
+    setState(() {
+      _isSubmitting = true;
+    });
 
-    Navigator.of(context).pop();
+    try {
+      if (isEditing) {
+        await transactionProvider.updateTransaction(
+          id: widget.transaction!.id,
+          title: _titleController.text,
+          amount: amount,
+          type: _selectedType,
+          date: _selectedDate,
+          category: _categoryController.text.isEmpty
+              ? null
+              : _categoryController.text,
+          description: _descriptionController.text.isEmpty
+              ? null
+              : _descriptionController.text,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transaction updated successfully')),
+        );
+      } else {
+        await transactionProvider.addTransaction(
+          title: _titleController.text,
+          amount: amount,
+          type: _selectedType,
+          date: _selectedDate,
+          category: _categoryController.text.isEmpty
+              ? null
+              : _categoryController.text,
+          description: _descriptionController.text.isEmpty
+              ? null
+              : _descriptionController.text,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transaction added successfully')),
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmDelete(BuildContext context, String transactionId) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Transaction?'),
+          content: const Text(
+            'Are you sure you want to delete this transaction? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true || !mounted) return;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await context.read<TransactionProvider>().deleteTransaction(transactionId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transaction deleted successfully')),
+      );
+      Navigator.of(context).pop();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 }
